@@ -1,0 +1,7 @@
+{
+    "auth": {
+        "join": {
+            "confirm_password_placeholder": "Confirm your password"
+        }
+    }
+}
