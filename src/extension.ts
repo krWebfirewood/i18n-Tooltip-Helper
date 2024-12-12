@@ -316,6 +316,70 @@ async function loadTranslationsWithConfig(context: vscode.ExtensionContext, work
     loadTranslations(workspaceFolder);
 }
 
+function watchTranslationFiles(context: vscode.ExtensionContext, workspaceFolder: vscode.WorkspaceFolder | undefined) {
+    if (!workspaceFolder) {
+        vscode.window.showErrorMessage('No workspace folder found!');
+        return;
+    }
+
+    const config = getConfig(workspaceFolder);
+    const translationFiles = config.translationFiles || [];
+
+    if (translationFiles.length === 0) {
+        vscode.window.showWarningMessage('No translation files specified in the configuration to watch.');
+        return;
+    }
+
+    // FileSystemWatcher 설정
+    const watchers: vscode.FileSystemWatcher[] = [];
+    for (const file of translationFiles) {
+        const filePath = path.join(workspaceFolder.uri.fsPath, file);
+        const watcher = vscode.workspace.createFileSystemWatcher(filePath);
+
+        // 파일 변경 감지
+        watcher.onDidChange(() => {
+            vscode.window.showInformationMessage(`Translation file changed: ${file}`);
+            reloadTranslationFile(filePath);
+        });
+
+        // 파일 삭제 감지
+        watcher.onDidDelete(() => {
+            vscode.window.showWarningMessage(`Translation file deleted: ${file}`);
+            removeTranslationFile(filePath);
+        });
+
+        // 파일 생성 감지
+        watcher.onDidCreate(() => {
+            vscode.window.showInformationMessage(`Translation file created: ${file}`);
+            reloadTranslationFile(filePath);
+        });
+
+        watchers.push(watcher);
+    }
+
+    // 종료 시 FileSystemWatcher 해제
+    context.subscriptions.push(...watchers);
+}
+
+function reloadTranslationFile(filePath: string) {
+    if (fs.existsSync(filePath)) {
+        loadTranslationFile(filePath, false); // 기존 로직 사용
+        vscode.window.showInformationMessage(`Reloaded translation file: ${filePath}`);
+    } else {
+        vscode.window.showErrorMessage(`Failed to reload translation file: ${filePath}`);
+    }
+}
+
+function removeTranslationFile(filePath: string) {
+    for (const key in translations) {
+        if (translations[key].source === filePath) {
+            delete translations[key];
+        }
+    }
+    vscode.window.showInformationMessage(`Removed translations from: ${filePath}`);
+}
+
+
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('i18n-helper extension is now active!!!!');
@@ -345,9 +409,13 @@ export function activate(context: vscode.ExtensionContext) {
         createConfigFile(workspaceFolder);
     });
 
-    context.subscriptions.push(loadCommand);
-    context.subscriptions.push(searchCommand);
-    context.subscriptions.push(createConfigCommand);
+    context.subscriptions.push(loadCommand, searchCommand, createConfigCommand);
+
+    // 번역 파일 변경 감지 시작
+    const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+    if (workspaceFolder) {
+        watchTranslationFiles(context, workspaceFolder);
+    }
 
     // 번역 키 정의로 이동
     registerDefinitionProvider(context);
@@ -355,6 +423,7 @@ export function activate(context: vscode.ExtensionContext) {
     // 번역 키 툴팁 등록
     registerHoverProvider(context);
 }
+
 
 
 
