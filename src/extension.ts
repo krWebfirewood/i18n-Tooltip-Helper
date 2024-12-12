@@ -28,7 +28,9 @@ function findTranslation(key: string): string | undefined {
 function loadTranslations(workspaceFolder: vscode.WorkspaceFolder | undefined) {
     const config = getConfig(workspaceFolder);
 
+    const flag = config.flag; // 플래그 값
     const translationFiles = config.translationFiles || [];
+
     if (translationFiles.length === 0) {
         vscode.window.showErrorMessage('No translation files specified in the configuration.');
         return;
@@ -36,24 +38,26 @@ function loadTranslations(workspaceFolder: vscode.WorkspaceFolder | undefined) {
 
     try {
         translations = {}; // 번역 데이터 초기화
-        for (const file of translationFiles) {
-            const translationPath = path.join(workspaceFolder?.uri.fsPath || '', file);
-            if (fs.existsSync(translationPath)) {
-                const content = fs.readFileSync(translationPath, 'utf8');
-                const json = JSON.parse(content);
 
-                // 병합하면서 각 키의 출처를 기록
-                for (const [key, value] of Object.entries(json)) {
-                    translations[key] = {
-                        value,
-                        source: translationPath
-                    };
+        // 플래그 값으로 파일 선택
+        if (flag && !isNaN(Number(flag))) {
+            const fileIndex = Number(flag) - 1; // 플래그 값은 1부터 시작한다고 가정
+            if (fileIndex >= 0 && fileIndex < translationFiles.length) {
+                const selectedFile = translationFiles[fileIndex];
+                const translationPath = path.join(workspaceFolder?.uri.fsPath || '', selectedFile);
+
+                if (fs.existsSync(translationPath)) {
+                    loadTranslationFile(translationPath, true);
+                    vscode.window.showInformationMessage(`Loaded translations from: ${selectedFile}`);
+                } else {
+                    vscode.window.showErrorMessage(`Translation file not found: ${selectedFile}`);
                 }
             } else {
-                vscode.window.showWarningMessage(`Translation file not found: ${translationPath}`);
+                vscode.window.showErrorMessage(`Invalid flag value: ${flag}. No corresponding translation file.`);
             }
+        } else {
+            vscode.window.showErrorMessage('Invalid or missing flag value. No translation file selected.');
         }
-        vscode.window.showInformationMessage('Translations loaded successfully!');
     } catch (error) {
         vscode.window.showErrorMessage(
             'Failed to load translation files: ' + (error instanceof Error ? error.message : String(error))
@@ -62,7 +66,18 @@ function loadTranslations(workspaceFolder: vscode.WorkspaceFolder | undefined) {
 }
 
 
+// 번역 파일 로드 및 병합 함수
+function loadTranslationFile(filePath: string, isSelected: boolean) {
+    const content = fs.readFileSync(filePath, 'utf8');
+    const json = JSON.parse(content);
 
+    for (const [key, value] of Object.entries(json)) {
+        translations[key] = {
+            value,
+            source: filePath
+        };
+    }
+}
 
 
 function registerHoverProvider(context: vscode.ExtensionContext) {
@@ -197,7 +212,7 @@ function findTranslationWithSource(key: string): { value: string | undefined; so
 
 
 
-function getConfig(workspaceFolder: vscode.WorkspaceFolder | undefined): { translationFiles: string[] } {
+function getConfig(workspaceFolder: vscode.WorkspaceFolder | undefined): { flag?: string; translationFiles: string[] } {
     if (!workspaceFolder) {
         vscode.window.showErrorMessage('No workspace folder found!');
         return { translationFiles: [] }; // 기본값
@@ -208,6 +223,7 @@ function getConfig(workspaceFolder: vscode.WorkspaceFolder | undefined): { trans
         try {
             const content = fs.readFileSync(configPath, 'utf8');
             const config = JSON.parse(content);
+
             if (config.translationFiles && Array.isArray(config.translationFiles)) {
                 return config;
             } else {
@@ -226,6 +242,8 @@ function getConfig(workspaceFolder: vscode.WorkspaceFolder | undefined): { trans
 }
 
 
+
+
 async function createConfigFile(workspaceFolder: vscode.WorkspaceFolder | undefined) {
     if (!workspaceFolder) {
         vscode.window.showErrorMessage('No workspace folder found!');
@@ -234,47 +252,51 @@ async function createConfigFile(workspaceFolder: vscode.WorkspaceFolder | undefi
 
     const configPath = path.join(workspaceFolder.uri.fsPath, 'i18n-helper.json');
 
-    if (fs.existsSync(configPath)) {
-        vscode.window.showWarningMessage('Configuration file "i18n-helper.json" already exists.');
-        return;
-    }
-
     try {
-        // 파일 선택 창 열기
+        let config: { flag?: string; translationFiles: string[] } = { translationFiles: [] };
+
+        // 기존 설정 파일 읽기
+        if (fs.existsSync(configPath)) {
+            const content = fs.readFileSync(configPath, 'utf8');
+            config = JSON.parse(content);
+        }
+
+        // 기본 flag 값 추가
+        if (!config.flag) {
+            config.flag = "1"; // 기본값
+        }
+
+        // 다중 파일 선택
         const selectedFiles = await vscode.window.showOpenDialog({
-            canSelectFiles: true,          // 파일 선택 가능
-            canSelectFolders: false,       // 폴더 선택 불가
-            canSelectMany: true,           // 다중 선택 가능
-            filters: {                     // JSON 파일 필터
-                'JSON Files': ['json'],
-                'All Files': ['*']
-            },
-            openLabel: 'Select Translation Files'
+            canSelectFiles: true,
+            canSelectFolders: false,
+            canSelectMany: true,
+            filters: { 'JSON Files': ['json'], 'All Files': ['*'] },
+            openLabel: 'Select Translation Files to Add'
         });
 
         if (!selectedFiles || selectedFiles.length === 0) {
-            vscode.window.showErrorMessage('No files selected. Configuration creation cancelled.');
+            vscode.window.showErrorMessage('No files selected. Configuration update cancelled.');
             return;
         }
 
-        // 선택된 파일 경로 가져오기
-        const translationFiles = selectedFiles.map(file =>
-            path.relative(workspaceFolder.uri.fsPath, file.fsPath)
-        );
+        // 새 파일 경로 추가
+        const newFiles = selectedFiles.map(file => path.relative(workspaceFolder.uri.fsPath, file.fsPath));
+        const uniqueFiles = [...new Set([...config.translationFiles, ...newFiles])]; // 중복 제거
 
-        // 설정 파일 내용 생성
-        const defaultConfig = {
-            translationFiles
-        };
+        config.translationFiles = uniqueFiles;
 
-        fs.writeFileSync(configPath, JSON.stringify(defaultConfig, null, 4), 'utf8');
-        vscode.window.showInformationMessage(`Configuration file "i18n-helper.json" created successfully at ${configPath}`);
+        // 설정 파일 업데이트
+        fs.writeFileSync(configPath, JSON.stringify(config, null, 4), 'utf8');
+        vscode.window.showInformationMessage(`Updated "i18n-helper.json" with new translation files.`);
     } catch (error) {
         vscode.window.showErrorMessage(
-            'Failed to create configuration file: ' + (error instanceof Error ? error.message : String(error))
+            'Failed to update configuration file: ' + (error instanceof Error ? error.message : String(error))
         );
     }
 }
+
+
 
 
 
