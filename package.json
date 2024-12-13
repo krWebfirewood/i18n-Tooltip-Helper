@@ -18,10 +18,6 @@
         "title": "Load i18n Translations"
       },
       {
-          "command": "i18n-helper.searchTranslation",
-          "title": "Search i18n Key"
-      },
-      {
         "command": "i18n-helper.createConfigFile",
         "title": "Create Configuration File"
       }
