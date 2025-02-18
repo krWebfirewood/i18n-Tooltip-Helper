@@ -1,4 +1,4 @@
-# webfirewood README
+# i18n-Tooltip-Helper README
 
 This is the README for your extension "webfirewood". After writing up a brief description, we recommend including the following sections.
 
